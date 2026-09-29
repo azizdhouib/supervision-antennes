@@ -1,0 +1,57 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telecom_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_NAME: "Free Mobile Network"
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: "http://localhost:8000"
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: telecom_db
+      DB_USERNAME: telecom_user
+      DB_PASSWORD: telecom_password
+      API_KEY: secret-telecom-api-token-2026
+    volumes:
+      - ./:/var/www/html
+      - /var/www/html/vendor
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - telecom-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: telecom_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: telecom_db
+      POSTGRES_USER: telecom_user
+      POSTGRES_PASSWORD: telecom_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - telecom_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telecom_user -d telecom_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - telecom-network
+
+volumes:
+  telecom_pgdata:
+    driver: local
+
+networks:
+  telecom-network:
+    driver: bridge
