@@ -1,0 +1,257 @@
+openapi: 3.0.3
+info:
+  title: API Supervision Réseau Mobile (Antennes & Interventions)
+  version: 1.0.0
+  description: |
+    API REST de pilotage du parc d'antennes de téléphonie mobile (> 100 000 antennes).
+    Permet aux techniciens de visualiser le statut des antennes et de déclarer ou clôturer des interventions.
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Serveur de développement local (v1)
+  - url: http://localhost:8000/api
+    description: Alias racine (sans préfixe version)
+
+paths:
+  /health:
+    get:
+      summary: Health check de l'API
+      description: Vérifie l'état de santé du service API.
+      responses:
+        '200':
+          description: Service opérationnel
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  service:
+                    type: string
+                    example: telecom-antenna-api
+                  timestamp:
+                    type: string
+                    example: "2026-09-29T18:00:00Z"
+
+  /antennas:
+    get:
+      summary: Liste paginée des antennes avec dernière intervention
+      description: |
+        Retourne la liste des antennes du réseau avec pagination et filtrage.
+        Chaque antenne embarque les informations de sa dernière intervention connue (sans problème N+1).
+      parameters:
+        - name: city
+          in: query
+          required: false
+          description: Filtrer par nom de ville (recherche partielle)
+          schema:
+            type: string
+            example: Paris
+        - name: status
+          in: query
+          required: false
+          description: Filtrer par statut de l'antenne
+          schema:
+            type: string
+            enum: [UP, DOWN]
+            example: DOWN
+        - name: per_page
+          in: query
+          required: false
+          description: Nombre d'antennes par page (défaut 15, max 100)
+          schema:
+            type: integer
+            default: 15
+            minimum: 1
+            maximum: 100
+        - name: page
+          in: query
+          required: false
+          description: Numéro de la page
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+      responses:
+        '200':
+          description: Liste récupérée avec succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Antenna'
+                  links:
+                    type: object
+                  meta:
+                    type: object
+        '422':
+          description: Paramètre de filtre invalide
+
+  /interventions:
+    post:
+      summary: Créer une intervention sur une antenne
+      description: |
+        Déclare une nouvelle intervention technique sur une antenne.
+        Règles métiers :
+        - Une seule intervention active par antenne est autorisée (renvoie 409 Conflict si une autre est en cours).
+        - La création bascule automatiquement le statut de l'antenne à DOWN.
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - antenna_id
+                - description
+                - technician_identity
+                - priority
+              properties:
+                antenna_id:
+                  type: integer
+                  example: 12
+                description:
+                  type: string
+                  example: Remplacement carte d'émission radio 5G défaillante
+                technician_identity:
+                  type: string
+                  example: Thomas Dubois
+                priority:
+                  type: string
+                  enum: [LOW, MEDIUM, HIGH]
+                  example: HIGH
+      responses:
+        '201':
+          description: Intervention créée avec succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Intervention'
+        '401':
+          description: Authentification requise (jeton manquant ou invalide)
+        '409':
+          description: Conflit - Une intervention active existe déjà sur cette antenne
+        '422':
+          description: Erreur de validation des champs
+
+  /interventions/{id}/close:
+    patch:
+      summary: Clôturer une intervention
+      description: |
+        Clôture une intervention active existante.
+        Règles métiers :
+        - Renseigne le champ ended_at à la date/heure courante.
+        - Repasse automatiquement le statut de l'antenne à UP (s'il n'y a pas d'autre intervention active).
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identifiant de l'intervention à clôturer
+          schema:
+            type: integer
+            example: 5
+      responses:
+        '200':
+          description: Intervention clôturée avec succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Intervention'
+        '401':
+          description: Authentification requise (jeton manquant ou invalide)
+        '404':
+          description: Intervention introuvable
+        '422':
+          description: L'intervention est déjà clôturée
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: "Jeton Bearer (ex: Authorization: Bearer secret-telecom-api-token-2026)"
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+      description: "Clé API dans l'en-tête X-API-KEY"
+
+  schemas:
+    Antenna:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: ANT-PAR-0001
+        city:
+          type: string
+          example: Paris
+        status:
+          type: string
+          enum: [UP, DOWN]
+          example: DOWN
+        has_active_intervention:
+          type: boolean
+          example: true
+        latest_intervention:
+          $ref: '#/components/schemas/Intervention'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Intervention:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 42
+        antenna_id:
+          type: integer
+          example: 1
+        description:
+          type: string
+          example: Intervention sur le module RF 3.5GHz
+        technician_identity:
+          type: string
+          example: Émilie Martin
+        priority:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+          example: HIGH
+        is_active:
+          type: boolean
+          example: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
